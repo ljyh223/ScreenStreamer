@@ -5,6 +5,8 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
+  # 添加手动触发支持
+  workflow_dispatch:
 
 jobs:
   build-windows:
@@ -17,7 +19,7 @@ jobs:
         with:
           path: src/ScreenStreamer
 
-      # 2. 安装 MSYS2 及 C 语言依赖
+      # 2. 安装 MSYS2 及 C 语言依赖 (libjpeg, ffmpeg)
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
@@ -35,15 +37,18 @@ jobs:
         with:
           go-version: "1.22"
 
-      # 4. 编译（核心难点在于 GOPATH 和 CGO 配置）
+      # 4. 编译（Legacy GOPATH 模式）
       - name: Build
         shell: msys2 {0}
         run: |
-          # 获取当前绝对路径作为 GOPATH
+          # 获取当前绝对路径
           WORKSPACE=$(pwd)
+          
+          # 按照 README 设置 GOPATH
+          # 注意：Go 在 Windows 路径处理上比较敏感，这里使用 MSYS2 转换后的路径
           export GOPATH=$WORKSPACE:$WORKSPACE/src/ScreenStreamer/lib
           
-          # 关键：关闭 Go Modules 模式，启用 CGO
+          # 强制关闭 Go Modules，开启 CGO
           export GO111MODULE=off
           export CGO_ENABLED=1
           
@@ -59,10 +64,24 @@ jobs:
           echo "Building get_active_window..."
           go build -o ../../get_active_window.exe ./cmd/get_active_window/get_active_window.go
 
-      # 5. 收集编译产物
+      # 5. 自动收集依赖的 DLL (防止 exe 无法运行)
+      - name: Collect DLLs
+        shell: msys2 {0}
+        run: |
+          cp /mingw64/bin/libjpeg-8.dll . || true
+          cp /mingw64/bin/avcodec-*.dll . || true
+          cp /mingw64/bin/avformat-*.dll . || true
+          cp /mingw64/bin/avutil-*.dll . || true
+          cp /mingw64/bin/swresample-*.dll . || true
+          cp /mingw64/bin/libgcc_s_seh-1.dll . || true
+          cp /mingw64/bin/libstdc++-6.dll . || true
+          cp /mingw64/bin/libwinpthread-1.dll . || true
+
+      # 6. 上传产物
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ScreenStreamer-Windows
+          name: ScreenStreamer-Windows-Full
           path: |
             *.exe
+            *.dll
