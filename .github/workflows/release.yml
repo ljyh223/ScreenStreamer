@@ -30,13 +30,12 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          path-type: inherit  # 使得 MSYS2 能够找到上面步骤安装的 go 命令
+          path-type: inherit
           install: >-
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-libjpeg-turbo
-            mingw-w64-x86_64-ffmpeg
+            mingw-w64-x86_64-ffmpeg4
             pkg-config
-
       # 4. 编译
       - name: Build
         shell: msys2 {0}
