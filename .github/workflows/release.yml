@@ -5,7 +5,6 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
-  # 添加手动触发支持
   workflow_dispatch:
 
 jobs:
@@ -13,75 +12,81 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # 1. 模拟 GOPATH 结构：将代码检出到 src/ScreenStreamer
+      # 1. 模拟 GOPATH 结构：检出代码到 src/ScreenStreamer
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           path: src/ScreenStreamer
 
-      # 2. 安装 MSYS2 及 C 语言依赖 (libjpeg, ffmpeg)
+      # 2. 设置 Go 环境
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      # 3. 设置 MSYS2 并继承 Windows 路径 (关键点: path-type: inherit)
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
+          path-type: inherit  # 使得 MSYS2 能够找到上面步骤安装的 go 命令
           install: >-
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-libjpeg-turbo
             mingw-w64-x86_64-ffmpeg
             pkg-config
 
-      # 3. 设置 Go 环境
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-
-      # 4. 编译（Legacy GOPATH 模式）
+      # 4. 编译
       - name: Build
         shell: msys2 {0}
         run: |
-          # 获取当前绝对路径
-          WORKSPACE=$(pwd)
+          # 转换当前路径为 Windows 风格的路径给 GOPATH 使用（Go 需要）
+          WORKSPACE_WIN=$(cygpath -w "$(pwd)")
           
-          # 按照 README 设置 GOPATH
-          # 注意：Go 在 Windows 路径处理上比较敏感，这里使用 MSYS2 转换后的路径
-          export GOPATH=$WORKSPACE:$WORKSPACE/src/ScreenStreamer/lib
-          
-          # 强制关闭 Go Modules，开启 CGO
+          # 设置旧版 Go 环境
+          export GOPATH="$WORKSPACE_WIN;$WORKSPACE_WIN\\src\\ScreenStreamer\\lib"
           export GO111MODULE=off
           export CGO_ENABLED=1
+          export CC=gcc
+          
+          # 检查环境 (调试用)
+          go version
+          gcc --version
           
           # 进入源码目录
           cd src/ScreenStreamer
           
+          # 如果缺少这个包，手动获取（旧版 Go 方式）
+          # go get github.com/pixiv/go-libjpeg/jpeg || true
+          
           echo "Building mjpeg..."
-          go build -o ../../mjpeg.exe ./cmd/mjpeg/mjpeg.go
+          go build -v -o ../../mjpeg.exe ./cmd/mjpeg/mjpeg.go
           
           echo "Building rtmp..."
-          go build -o ../../rtmp.exe ./cmd/rtmp/rtmp.go
+          go build -v -o ../../rtmp.exe ./cmd/rtmp/rtmp.go
           
           echo "Building get_active_window..."
-          go build -o ../../get_active_window.exe ./cmd/get_active_window/get_active_window.go
+          go build -v -o ../../get_active_window.exe ./cmd/get_active_window/get_active_window.go
 
-      # 5. 自动收集依赖的 DLL (防止 exe 无法运行)
+      # 5. 收集 DLL (这些是运行所必须的)
       - name: Collect DLLs
         shell: msys2 {0}
         run: |
-          cp /mingw64/bin/libjpeg-8.dll . || true
-          cp /mingw64/bin/avcodec-*.dll . || true
-          cp /mingw64/bin/avformat-*.dll . || true
-          cp /mingw64/bin/avutil-*.dll . || true
-          cp /mingw64/bin/swresample-*.dll . || true
-          cp /mingw64/bin/libgcc_s_seh-1.dll . || true
-          cp /mingw64/bin/libstdc++-6.dll . || true
-          cp /mingw64/bin/libwinpthread-1.dll . || true
+          mkdir -p dist
+          mv *.exe dist/
+          cp /mingw64/bin/libjpeg-8.dll dist/ || true
+          cp /mingw64/bin/avcodec-*.dll dist/ || true
+          cp /mingw64/bin/avformat-*.dll dist/ || true
+          cp /mingw64/bin/avutil-*.dll dist/ || true
+          cp /mingw64/bin/swresample-*.dll dist/ || true
+          cp /mingw64/bin/libgcc_s_seh-1.dll dist/ || true
+          cp /mingw64/bin/libstdc++-6.dll dist/ || true
+          cp /mingw64/bin/libwinpthread-1.dll dist/ || true
 
       # 6. 上传产物
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ScreenStreamer-Windows-Full
-          path: |
-            *.exe
-            *.dll
+          path: dist/
