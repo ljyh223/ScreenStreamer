@@ -1,82 +1,68 @@
-name: Build and Release
+name: Build Windows Target (Legacy Go)
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+  build-windows:
+    runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      # 1. 模拟 GOPATH 结构：将代码检出到 src/ScreenStreamer
+      - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          path: src/ScreenStreamer
 
+      # 2. 安装 MSYS2 及 C 语言依赖
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-libjpeg-turbo
+            mingw-w64-x86_64-ffmpeg
+            pkg-config
+
+      # 3. 设置 Go 环境
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
 
-      # Linux 构建依赖
-      - name: Install dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
+      # 4. 编译（核心难点在于 GOPATH 和 CGO 配置）
+      - name: Build
+        shell: msys2 {0}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libjpeg-turbo8-dev
-          sudo apt-get install -y libav-tools libavcodec-dev libavformat-dev
+          # 获取当前绝对路径作为 GOPATH
+          WORKSPACE=$(pwd)
+          export GOPATH=$WORKSPACE:$WORKSPACE/src/ScreenStreamer/lib
+          
+          # 关键：关闭 Go Modules 模式，启用 CGO
+          export GO111MODULE=off
+          export CGO_ENABLED=1
+          
+          # 进入源码目录
+          cd src/ScreenStreamer
+          
+          echo "Building mjpeg..."
+          go build -o ../../mjpeg.exe ./cmd/mjpeg/mjpeg.go
+          
+          echo "Building rtmp..."
+          go build -o ../../rtmp.exe ./cmd/rtmp/rtmp.go
+          
+          echo "Building get_active_window..."
+          go build -o ../../get_active_window.exe ./cmd/get_active_window/get_active_window.go
 
-      # Windows 构建依赖
-      - name: Install dependencies (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          echo "安装 MSYS2 和 mingw-w64"
-          choco install msys2 --no-progress -y
-
-          echo "安装 mingw64 工具链"
-          C:\tools\msys64\usr\bin\bash -lc "pacman -Sy --noconfirm mingw-w64-x86_64-gcc mingw-w64-x86_64-libjpeg-turbo mingw-w64-x86_64-ffmpeg"
-
-          echo "添加 mingw64 到 PATH"
-          echo "C:\tools\msys64\mingw64\bin" >> $env:GITHUB_PATH
-
-      - name: Build mjpeg
-        run: |
-          go build -o mjpeg${{ matrix.os == 'windows-latest' && '.exe' || '' }} ./cmd/mjpeg/mjpeg.go
-
-      - name: Build rtmp
-        run: |
-          go build -o rtmp${{ matrix.os == 'windows-latest' && '.exe' || '' }} ./cmd/rtmp/rtmp.go
-
-      - name: Build get_active_window
-        run: |
-          go build -o get_active_window${{ matrix.os == 'windows-latest' && '.exe' || '' }} ./cmd/get_active_window/get_active_window.go
-
-      - name: Upload artifacts
+      # 5. 收集编译产物
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: screenstreamer-${{ matrix.os }}
+          name: ScreenStreamer-Windows
           path: |
-            mjpeg*
-            rtmp*
-            get_active_window*
-  
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/**/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            *.exe
