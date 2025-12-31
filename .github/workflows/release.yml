@@ -1,0 +1,82 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      # Linux 构建依赖
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libjpeg-turbo8-dev
+          sudo apt-get install -y libav-tools libavcodec-dev libavformat-dev
+
+      # Windows 构建依赖
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          echo "安装 MSYS2 和 mingw-w64"
+          choco install msys2 --no-progress -y
+
+          echo "安装 mingw64 工具链"
+          C:\tools\msys64\usr\bin\bash -lc "pacman -Sy --noconfirm mingw-w64-x86_64-gcc mingw-w64-x86_64-libjpeg-turbo mingw-w64-x86_64-ffmpeg"
+
+          echo "添加 mingw64 到 PATH"
+          echo "C:\tools\msys64\mingw64\bin" >> $env:GITHUB_PATH
+
+      - name: Build mjpeg
+        run: |
+          go build -o mjpeg${{ matrix.os == 'windows-latest' && '.exe' || '' }} ./cmd/mjpeg/mjpeg.go
+
+      - name: Build rtmp
+        run: |
+          go build -o rtmp${{ matrix.os == 'windows-latest' && '.exe' || '' }} ./cmd/rtmp/rtmp.go
+
+      - name: Build get_active_window
+        run: |
+          go build -o get_active_window${{ matrix.os == 'windows-latest' && '.exe' || '' }} ./cmd/get_active_window/get_active_window.go
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenstreamer-${{ matrix.os }}
+          path: |
+            mjpeg*
+            rtmp*
+            get_active_window*
+  
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
